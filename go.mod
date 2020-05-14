@@ -1,6 +1,8 @@
 module github.com/acoshift/goreload
 
+go 1.14
+
 require (
 	github.com/mattn/go-shellwords v1.0.5
-	gopkg.in/urfave/cli.v1 v1.20.0
+	github.com/urfave/cli/v2 v2.2.0
 )

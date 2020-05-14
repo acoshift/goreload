@@ -3,17 +3,16 @@ package main
 import (
 	"errors"
 	"fmt"
-
-	"github.com/acoshift/goreload/internal"
-	shellwords "github.com/mattn/go-shellwords"
-	"gopkg.in/urfave/cli.v1"
-
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/acoshift/goreload/internal"
+	"github.com/mattn/go-shellwords"
+	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -30,89 +29,96 @@ func main() {
 	app.Usage = "A live reload utility for Go web applications."
 	app.Action = mainAction
 	app.Flags = []cli.Flag{
-		cli.StringFlag{
-			Name:  "bin,b",
-			Value: ".goreload",
-			Usage: "name of generated binary file",
+		&cli.StringFlag{
+			Name:    "bin",
+			Aliases: []string{"b"},
+			Value:   ".goreload",
+			Usage:   "name of generated binary file",
 		},
-		cli.StringFlag{
-			Name:  "path,t",
-			Value: ".",
-			Usage: "Path to watch files from",
+		&cli.StringFlag{
+			Name:    "path",
+			Aliases: []string{"t"},
+			Value:   ".",
+			Usage:   "Path to watch files from",
 		},
-		cli.StringFlag{
-			Name:  "build,d",
-			Value: "",
-			Usage: "Path to build files from (defaults to same value as --path)",
+		&cli.StringFlag{
+			Name:    "build",
+			Aliases: []string{"d"},
+			Value:   "",
+			Usage:   "Path to build files from (defaults to same value as --path)",
 		},
-		cli.StringSliceFlag{
-			Name:  "excludeDir,x",
-			Value: &cli.StringSlice{},
-			Usage: "Relative directories to exclude",
+		&cli.StringSliceFlag{
+			Name:    "excludeDir",
+			Aliases: []string{"x"},
+			Value:   &cli.StringSlice{},
+			Usage:   "Relative directories to exclude",
 		},
-		cli.BoolFlag{
+		&cli.BoolFlag{
 			Name:  "all",
 			Usage: "reloads whenever any file changes, as opposed to reloading only on .go file change",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "buildArgs",
 			Usage: "Additional go build arguments",
 		},
-		cli.StringFlag{
+		&cli.StringFlag{
 			Name:  "logPrefix",
 			Usage: "Log prefix",
 			Value: "goreload",
 		},
 	}
-	app.Commands = []cli.Command{
+	app.Commands = []*cli.Command{
 		{
-			Name:      "run",
-			ShortName: "r",
-			Usage:     "Run the goreload",
-			Action:    mainAction,
+			Name:    "run",
+			Aliases: []string{"r"},
+			Usage:   "Run the goreload",
+			Action:  mainAction,
 		},
 	}
 
-	app.Run(os.Args)
+	if err := app.Run(os.Args); err != nil {
+		logger.Fatal(err)
+	}
 }
 
-func mainAction(c *cli.Context) {
-	all := c.GlobalBool("all")
-	logPrefix := c.GlobalString("logPrefix")
+func mainAction(c *cli.Context) error {
+	logger.SetPrefix(fmt.Sprintf("[%s] ", c.String("logPrefix")))
 
-	logger.SetPrefix(fmt.Sprintf("[%s] ", logPrefix))
-
+	all := c.Bool("all")
 	wd, err := os.Getwd()
 	if err != nil {
 		logger.Fatal(err)
+		return err
 	}
 
-	buildArgs, err := shellwords.Parse(c.GlobalString("buildArgs"))
+	buildArgs, err := shellwords.Parse(c.String("buildArgs"))
 	if err != nil {
-		logger.Fatal(err)
+		return err
 	}
 
-	buildPath := c.GlobalString("build")
+	buildPath := c.String("build")
 	if buildPath == "" {
-		buildPath = c.GlobalString("path")
+		buildPath = c.String("path")
 	}
-	builder := internal.NewBuilder(buildPath, c.GlobalString("bin"), wd, buildArgs)
-	runner := internal.NewRunner(filepath.Join(wd, builder.Binary()), c.Args()...)
+	builder := internal.NewBuilder(buildPath, c.String("bin"), wd, buildArgs)
+	runner := internal.NewRunner(filepath.Join(wd, builder.Binary()), c.Args().Slice()...)
 	runner.SetWriter(os.Stdout)
 
 	shutdown(runner)
 
 	// build right now
-	build(builder, runner, logger)
+	build(builder, runner)
 
 	// scan for changes
-	scanChanges(c.GlobalString("path"), c.GlobalStringSlice("excludeDir"), all, func() {
+	scanChanges(c.String("path"), c.StringSlice("excludeDir"), all, func() {
 		runner.Kill()
-		build(builder, runner, logger)
+		build(builder, runner)
 	})
+
+	return nil
 }
 
-func build(builder internal.Builder, runner internal.Runner, logger *log.Logger) {
+func build(builder internal.Builder, runner internal.Runner) {
 	logger.Println("Building...")
 
 	err := builder.Build()
